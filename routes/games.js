@@ -2,6 +2,132 @@ const express = require('express');
 const router = express.Router();
 const Game = require('../models/Game');
 const auth = require('../middleware/auth');
+const { generateSessionCode } = require('../utils/sessionCode');
+
+// ===== LOBBY ENDPOINTS (No auth required for anonymous lobbies) =====
+
+// Create a new lobby session
+router.post('/session', async (req, res) => {
+  try {
+    const { gameVariant = 'cricket', playerName } = req.body;
+    
+    // Generate unique session code
+    let sessionCode;
+    let isUnique = false;
+    let attempts = 0;
+    
+    while (!isUnique && attempts < 10) {
+      sessionCode = generateSessionCode();
+      const existing = await Game.findOne({ sessionCode });
+      if (!existing) {
+        isUnique = true;
+      }
+      attempts++;
+    }
+    
+    if (!isUnique) {
+      return res.status(500).json({ message: 'Failed to generate unique session code' });
+    }
+    
+    // Create lobby game
+    const game = new Game({
+      name: `${gameVariant} Game - ${sessionCode}`,
+      type: 'darts',
+      status: 'lobby',
+      sessionCode,
+      isAnonymous: true,
+      gameVariant,
+      teams: { A: [], B: [] },
+      turnOrder: []
+    });
+    
+    // Add creator as first player
+    if (playerName) {
+      game.turnOrder.push(playerName);
+      game.teams.A.push(playerName);
+    }
+    
+    await game.save();
+    
+    res.status(201).json({
+      gameId: game._id,
+      sessionCode: game.sessionCode,
+      gameVariant: game.gameVariant,
+      players: game.turnOrder,
+      teams: game.teams,
+      status: game.status
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error creating lobby', error: error.message });
+  }
+});
+
+// Join a lobby by session code
+router.post('/session/join', async (req, res) => {
+  try {
+    const { sessionCode, playerName } = req.body;
+    
+    if (!sessionCode || !playerName) {
+      return res.status(400).json({ message: 'Session code and player name are required' });
+    }
+    
+    const game = await Game.findOne({ sessionCode, status: 'lobby' });
+    
+    if (!game) {
+      return res.status(404).json({ message: 'Lobby not found or game has already started' });
+    }
+    
+    // Check if player already in lobby
+    if (game.turnOrder.includes(playerName)) {
+      return res.status(400).json({ message: 'Player already in lobby' });
+    }
+    
+    // Add player to lobby
+    game.turnOrder.push(playerName);
+    // Add to team A by default (can be reassigned later)
+    game.teams.A.push(playerName);
+    
+    await game.save();
+    
+    res.json({
+      gameId: game._id,
+      sessionCode: game.sessionCode,
+      gameVariant: game.gameVariant,
+      players: game.turnOrder,
+      teams: game.teams,
+      status: game.status
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error joining lobby', error: error.message });
+  }
+});
+
+// Get lobby state by session code
+router.get('/session/:sessionCode', async (req, res) => {
+  try {
+    const { sessionCode } = req.params;
+    
+    const game = await Game.findOne({ sessionCode });
+    
+    if (!game) {
+      return res.status(404).json({ message: 'Lobby not found' });
+    }
+    
+    res.json({
+      gameId: game._id,
+      sessionCode: game.sessionCode,
+      gameVariant: game.gameVariant,
+      players: game.turnOrder,
+      teams: game.teams,
+      status: game.status,
+      activePlayer: game.activePlayer
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching lobby', error: error.message });
+  }
+});
+
+// ===== EXISTING GAME ENDPOINTS (Auth required) =====
 
 // Create a new game
 router.post('/', auth, async (req, res) => {
