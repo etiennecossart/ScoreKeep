@@ -20,10 +20,9 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/scorekeep
 .then(() => console.log('Connected to MongoDB'))
 .catch((err) => console.error('MongoDB connection error:', err));
 
-// Routes (to be implemented)
+// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/games', require('./routes/games'));
-app.use('/api/scores', require('./routes/scores'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
